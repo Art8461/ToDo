@@ -13,24 +13,28 @@ import UIKit
 class EditToDoViewController: UIViewController {
     var todo: ToDo?
     var onSave: ((ToDo) -> Void)?
-
+    
     @IBOutlet weak var nameTextField: UITextField!
     @IBOutlet weak var descriptionTextView: UITextView!
-
+    @IBOutlet weak var dateEdit: UILabel!
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         nameTextField.text = todo?.name
-        descriptionTextView.text = todo?.description
+        descriptionTextView.text = todo?.descriptionToDo
+        dateEdit.text = DateFormatter.sharedDisplayFormatter.string(from: todo?.date ?? Date())
+
     }
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
 
-    @IBAction func saveButtonTapped(_ sender: UIButton) {
-        guard let name = nameTextField.text, !name.isEmpty else { return }
-
-        let updated = todo ?? ToDo(name: name, isCompleted: false)
-        updated.name = name
-        updated.description = descriptionTextView.text
-
-        onSave?(updated)
-        navigationController?.popViewController(animated: true)
+        // Проверяем, что пользователь нажал «назад», а не, например, показался алерт или другой экран
+        if self.isMovingFromParent {
+            if let updatedToDo = todo {
+                updatedToDo.name = nameTextField.text ?? ""
+                updatedToDo.descriptionToDo = descriptionTextView.text ?? ""
+                onSave?(updatedToDo)
+            }
+        }
     }
 }

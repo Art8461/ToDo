@@ -1,3 +1,11 @@
+//
+//  TodoAPIResponse.swift
+//  ToDo
+//
+//  Created by Artem Kuzmenko on 06.08.2025.
+//
+
+
 // TodoAPIModel.swift
 import Foundation
 
