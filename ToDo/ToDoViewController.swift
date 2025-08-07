@@ -1,5 +1,5 @@
 //
-//  ViewController.swift
+//  ToDoViewController.swift
 //  ToDo
 //
 //  Created by Artem Kuzmenko on 03.08.2025.
@@ -8,13 +8,11 @@
 import UIKit
 import CoreData
 
-class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate, toDoCellDelegate {
+class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate, toDoCellDelegate {
     
     // MARK: - Properties
     
-    var todos: [ToDo] = [
-        ToDo(name: "Buy milk", isCompleted: false, description: "Зайти в пятерочку купить 2,5% молока увеличиваю текст чтобы посмотреть перенос строки")
-    ]
+    var todos: [ToDo] = []
     var filteredTodos: [ToDo] = []
     var selectedToDo: ToDo?
     var isSearching = false
@@ -118,18 +116,7 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
         performSegue(withIdentifier: "showEdit", sender: self)
         tableView.deselectRow(at: indexPath, animated: true)
     }
-    
-    /*
-     // Swipe to delete (в случае активации)
-     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
-     if editingStyle == .delete {
-     todos.remove(at: indexPath.row)
-     tableView.deleteRows(at: [indexPath], with: .fade)
-     updateTaskCount()
-     }
-     }
-     */
-    
+
     // MARK: - toDoCellDelegate
     
     func cellTapped(cell: ToDoTableViewCell) {
