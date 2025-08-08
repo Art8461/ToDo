@@ -4,16 +4,14 @@
 //
 //  Created by Artem Kuzmenko on 03.08.2025.
 //
-
 import UIKit
 import CoreData
 
-class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate, toDoCellDelegate {
+class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate, toDoCellDelegate, NSFetchedResultsControllerDelegate {
     
     // MARK: - Properties
     
-    var todos: [ToDo] = []
-    var filteredTodos: [ToDo] = []
+    var fetchedResultsController: NSFetchedResultsController<NSManagedObject>!
     var selectedToDo: ToDo?
     var isSearching = false
     
@@ -23,14 +21,13 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
     @IBOutlet weak var searchToDo: UISearchBar!
     @IBOutlet weak var count: UILabel!
     
-    
     // MARK: - Lifecycle
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
         setupDelegates()
-        fetchTasks()
+        setupFetchedResultsController()
         updateTaskCount()
         
         if UserDefaults.standard.bool(forKey: "hasLoadedTasks") == false {
@@ -39,7 +36,6 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
         
         setupGestureRecognizers()
     }
-    
     
     // MARK: - Setup
     
@@ -57,6 +53,36 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
         }
     }
     
+    private func setupFetchedResultsController(searchText: String? = nil) {
+        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
+        let context = appDelegate.persistentContainer.viewContext
+        
+        let fetchRequest = NSFetchRequest<NSManagedObject>(entityName: "Task")
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "dateToDo", ascending: true)]
+        
+        if let text = searchText, !text.isEmpty {
+            fetchRequest.predicate = NSPredicate(format: "name CONTAINS[c] %@ OR descriptionToDo CONTAINS[c] %@", text, text)
+            isSearching = true
+        } else {
+            fetchRequest.predicate = nil
+            isSearching = false
+        }
+        
+        fetchedResultsController = NSFetchedResultsController(
+            fetchRequest: fetchRequest,
+            managedObjectContext: context,
+            sectionNameKeyPath: nil,
+            cacheName: nil
+        )
+        fetchedResultsController.delegate = self
+        
+        do {
+            try fetchedResultsController.performFetch()
+            tableView.reloadData()
+        } catch {
+            print("❌ Ошибка при загрузке задач: \(error)")
+        }
+    }
     
     // MARK: - Actions
     
@@ -68,17 +94,11 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
         alert.addAction(cancelButton)
         
         let saveButton = UIAlertAction(title: "Сохранить", style: .default) { _ in
-            if let textName = alert.textFields?.first?.text {
+            if let textName = alert.textFields?.first?.text, !textName.isEmpty {
                 let now = Date()
                 let newId = UUID()
-                let newToDo = ToDo(name: textName, isCompleted: false, id: newId, description: nil, date: now)
-                
-                self.todos.append(newToDo)
-                self.tableView.reloadData()
-                self.updateTaskCount()
-                
                 self.saveTask(name: textName, isCompleted: false, id: newId, description: nil, date: now)
-                self.fetchTasks()
+                self.updateTaskCount()
             }
         }
         alert.addAction(saveButton)
@@ -89,22 +109,28 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
         view.endEditing(true)
     }
     
-    
     // MARK: - UITableViewDataSource
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return isSearching ? filteredTodos.count : todos.count
+        return fetchedResultsController.fetchedObjects?.count ?? 0
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        
         guard let cell = tableView.dequeueReusableCell(withIdentifier: "todoCell", for: indexPath) as? ToDoTableViewCell else {
             return UITableViewCell()
         }
         
-        let todoCell = isSearching ? filteredTodos[indexPath.row] : todos[indexPath.row]
+        let task = fetchedResultsController.object(at: indexPath)
+        let todo = ToDo(
+            name: task.value(forKey: "name") as? String ?? "",
+            isCompleted: task.value(forKey: "isCompleted") as? Bool ?? false,
+            id: task.value(forKey: "newId") as? UUID ?? UUID(),
+            description: task.value(forKey: "descriptionToDo") as? String,
+            date: task.value(forKey: "dateToDo") as? Date ?? Date(),
+            userId: task.value(forKey: "userId") as? Int
+        )
         cell.delegate = self
-        cell.updateCell(with: todoCell)
+        cell.updateCell(with: todo)
         
         return cell
     }
@@ -112,109 +138,119 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
     // MARK: - UITableViewDelegate
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        selectedToDo = isSearching ? filteredTodos[indexPath.row] : todos[indexPath.row]
+        let task = fetchedResultsController.object(at: indexPath)
+        selectedToDo = ToDo(
+            name: task.value(forKey: "name") as? String ?? "",
+            isCompleted: task.value(forKey: "isCompleted") as? Bool ?? false,
+            id: task.value(forKey: "newId") as? UUID ?? UUID(),
+            description: task.value(forKey: "descriptionToDo") as? String,
+            date: task.value(forKey: "dateToDo") as? Date ?? Date(),
+            userId: task.value(forKey: "userId") as? Int
+        )
         performSegue(withIdentifier: "showEdit", sender: self)
         tableView.deselectRow(at: indexPath, animated: true)
     }
-
+    
     // MARK: - toDoCellDelegate
     
+    // Статус задания
+    
     func cellTapped(cell: ToDoTableViewCell) {
-        guard let index = tableView.indexPath(for: cell) else { return }
+        guard let indexPath = tableView.indexPath(for: cell) else { return }
+        let task = fetchedResultsController.object(at: indexPath)
+        let newValue = !(task.value(forKey: "isCompleted") as? Bool ?? false)
+        task.setValue(newValue, forKey: "isCompleted")
         
-        let toDo = isSearching ? filteredTodos[index.row] : todos[index.row]
-        let newValue = !toDo.isCompleted
-        
-        if isSearching {
-            if let originalIndex = todos.firstIndex(where: { $0.id == toDo.id }) {
-                todos[originalIndex].isCompleted = newValue
-                updateTaskInCoreData(updatedToDo: todos[originalIndex])
-            }
-            filteredTodos[index.row].isCompleted = newValue
-        } else {
-            todos[index.row].isCompleted = newValue
-            updateTaskInCoreData(updatedToDo: todos[index.row])
+        do {
+            try task.managedObjectContext?.save()
+        } catch {
+            print("❌ Ошибка при обновлении: \(error)")
         }
-        
-        tableView.reloadRows(at: [index], with: .automatic)
     }
     
+    // Поделиться заданием
+    
     func shareTask(cell: ToDoTableViewCell) {
-        guard let index = tableView.indexPath(for: cell) else { return }
-        let todo = isSearching ? filteredTodos[index.row] : todos[index.row]
+        guard let indexPath = tableView.indexPath(for: cell) else { return }
+        let task = fetchedResultsController.object(at: indexPath)
+        let name = task.value(forKey: "name") as? String ?? ""
+        let description = task.value(forKey: "descriptionToDo") as? String ?? ""
         
-        let textToShare = "Задача: \(todo.name)\nОписание: \(todo.descriptionToDo ?? "")"
+        let textToShare = "Задача: \(name)\nОписание: \(description)"
         let activityVC = UIActivityViewController(activityItems: [textToShare], applicationActivities: nil)
         present(activityVC, animated: true)
     }
     
+    // Удалить задание
+    
     func deleteTask(cell: ToDoTableViewCell) {
         guard let indexPath = tableView.indexPath(for: cell) else { return }
+        let task = fetchedResultsController.object(at: indexPath)
         
-        let toDo = isSearching ? filteredTodos[indexPath.row] : todos[indexPath.row]
-        
-        deleteTaskFromCoreData(id: toDo.id)
-        
-        if isSearching {
-            if let originalIndex = todos.firstIndex(where: { $0.id == toDo.id }) {
-                todos.remove(at: originalIndex)
-            }
-            filteredTodos.remove(at: indexPath.row)
-        } else {
-            todos.remove(at: indexPath.row)
+        task.managedObjectContext?.delete(task)
+        do {
+            try task.managedObjectContext?.save()
+            updateTaskCount()
+        } catch {
+            print("❌ Ошибка при удалении: \(error)")
         }
-        
-        tableView.deleteRows(at: [indexPath], with: .automatic)
-        updateTaskCount()
     }
+    
+    // Редактировать задание
     
     func editTask(cell: ToDoTableViewCell) {
-        if let indexPath = tableView.indexPath(for: cell) {
-            let task = isSearching ? filteredTodos[indexPath.row] : todos[indexPath.row]
-            selectedToDo = task
-            performSegue(withIdentifier: "showEdit", sender: self)
-        }
+        guard let indexPath = tableView.indexPath(for: cell) else { return }
+        let task = fetchedResultsController.object(at: indexPath)
+        selectedToDo = ToDo(
+            name: task.value(forKey: "name") as? String ?? "",
+            isCompleted: task.value(forKey: "isCompleted") as? Bool ?? false,
+            id: task.value(forKey: "newId") as? UUID ?? UUID(),
+            description: task.value(forKey: "descriptionToDo") as? String,
+            date: task.value(forKey: "dateToDo") as? Date ?? Date(),
+            userId: task.value(forKey: "userId") as? Int
+        )
+        performSegue(withIdentifier: "showEdit", sender: self)
     }
     
-    // MARK: - Navigation
+    // MARK: - Navigation Переход к экрану редактирования
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
         if segue.identifier == "showEdit",
            let destination = segue.destination as? EditToDoViewController,
-           let toDo = selectedToDo,
-           let index = todos.firstIndex(where: { $0.id == toDo.id }) {
+           let toDo = selectedToDo {
             
             destination.todo = toDo
             destination.onSave = { [weak self] updatedToDo in
-                self?.todos[index] = updatedToDo
-                self?.updateTaskInCoreData(updatedToDo: updatedToDo)
-                self?.tableView.reloadData()
+                guard let self = self else { return }
+                let fetchRequest = NSFetchRequest<NSManagedObject>(entityName: "Task")
+                fetchRequest.predicate = NSPredicate(format: "newId == %@", updatedToDo.id as CVarArg)
+                
+                do {
+                    let results = try self.fetchedResultsController.managedObjectContext.fetch(fetchRequest)
+                    if let existingTask = results.first {
+                        existingTask.setValue(updatedToDo.name, forKey: "name")
+                        existingTask.setValue(updatedToDo.descriptionToDo, forKey: "descriptionToDo")
+                        existingTask.setValue(updatedToDo.isCompleted, forKey: "isCompleted")
+                        existingTask.setValue(updatedToDo.date, forKey: "dateToDo")
+                        existingTask.setValue(updatedToDo.userId, forKey: "userId")
+                        try existingTask.managedObjectContext?.save()
+                    }
+                } catch {
+                    print("❌ Ошибка при обновлении: \(error)")
+                }
             }
         }
     }
     
-    
-    // MARK: - UISearchBarDelegate
+    // MARK: - UISearchBarDelegate Поисковик
     
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        guard !searchText.isEmpty else {
-            isSearching = false
-            tableView.reloadData()
-            return
-        }
-        
-        isSearching = true
-        filteredTodos = todos.filter {
-            $0.name.lowercased().contains(searchText.lowercased()) ||
-            ($0.descriptionToDo?.lowercased().contains(searchText.lowercased()) ?? false)
-        }
-        tableView.reloadData()
+        setupFetchedResultsController(searchText: searchText)
     }
     
     func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        isSearching = false
+        setupFetchedResultsController()
         searchBar.text = ""
-        tableView.reloadData()
         searchBar.resignFirstResponder()
     }
     
@@ -222,14 +258,47 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
         view.endEditing(true)
     }
     
+    // MARK: - NSFetchedResultsControllerDelegate
     
-    // MARK: - Task Count
-    
-    func updateTaskCount() {
-        let total = todos.count
-        count.text = "\(total)"
+    func controllerWillChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
+        tableView.beginUpdates()
     }
     
+    func controller(_ controller: NSFetchedResultsController<NSFetchRequestResult>, didChange anObject: Any, at indexPath: IndexPath?, for type: NSFetchedResultsChangeType, newIndexPath: IndexPath?) {
+        switch type {
+        case .insert:
+            if let newIndexPath = newIndexPath {
+                tableView.insertRows(at: [newIndexPath], with: .automatic)
+            }
+        case .delete:
+            if let indexPath = indexPath {
+                tableView.deleteRows(at: [indexPath], with: .automatic)
+            }
+        case .update:
+            if let indexPath = indexPath {
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            }
+        case .move:
+            if let indexPath = indexPath, let newIndexPath = newIndexPath {
+                tableView.deleteRows(at: [indexPath], with: .automatic)
+                tableView.insertRows(at: [newIndexPath], with: .automatic)
+            }
+        @unknown default:
+            break
+        }
+    }
+    
+    func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
+        tableView.endUpdates()
+        updateTaskCount()
+    }
+    
+    // MARK: - Task Count Общее количество задач
+    
+    func updateTaskCount() {
+        let total = fetchedResultsController.fetchedObjects?.count ?? 0
+        count.text = "\(total)"
+    }
     
     // MARK: - Core Data Operations
     
@@ -253,70 +322,6 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
         }
     }
     
-    func fetchTasks() {
-        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
-        let context = appDelegate.persistentContainer.viewContext
-        
-        let fetchRequest = NSFetchRequest<NSManagedObject>(entityName: "Task")
-        
-        do {
-            let coreDataTasks = try context.fetch(fetchRequest)
-            todos = coreDataTasks.map { object in
-                ToDo(
-                    name: object.value(forKey: "name") as? String ?? "",
-                    isCompleted: object.value(forKey: "isCompleted") as? Bool ?? false,
-                    id: object.value(forKey: "newId") as? UUID ?? UUID(),
-                    description: object.value(forKey: "descriptionToDo") as? String,
-                    date: object.value(forKey: "dateToDo") as? Date ?? Date(),
-                    userId: object.value(forKey: "userId") as? Int
-                )
-            }
-        } catch {
-            print("❌ Ошибка при загрузке: \(error)")
-        }
-    }
-    
-    func updateTaskInCoreData(updatedToDo: ToDo) {
-        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
-        let context = appDelegate.persistentContainer.viewContext
-        
-        let fetchRequest = NSFetchRequest<NSManagedObject>(entityName: "Task")
-        fetchRequest.predicate = NSPredicate(format: "newId == %@", updatedToDo.id as CVarArg)
-        
-        do {
-            let results = try context.fetch(fetchRequest)
-            if let existingTask = results.first {
-                existingTask.setValue(updatedToDo.name, forKey: "name")
-                existingTask.setValue(updatedToDo.descriptionToDo, forKey: "descriptionToDo")
-                existingTask.setValue(updatedToDo.isCompleted, forKey: "isCompleted")
-                existingTask.setValue(updatedToDo.date, forKey: "dateToDo")
-                existingTask.setValue(updatedToDo.userId, forKey: "userId")
-                try context.save()
-            }
-        } catch {
-            print("❌ Ошибка при обновлении: \(error)")
-        }
-    }
-    
-    func deleteTaskFromCoreData(id: UUID) {
-        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
-        let context = appDelegate.persistentContainer.viewContext
-        
-        let fetchRequest = NSFetchRequest<NSManagedObject>(entityName: "Task")
-        fetchRequest.predicate = NSPredicate(format: "newId == %@", id as CVarArg)
-        
-        do {
-            let results = try context.fetch(fetchRequest)
-            if let taskToDelete = results.first {
-                context.delete(taskToDelete)
-                try context.save()
-            }
-        } catch {
-            print("❌ Ошибка при удалении: \(error)")
-        }
-    }
-    
-    
     // MARK: - API Loading
     
     func loadTodosFromAPI() {
@@ -328,31 +333,18 @@ class ToDoViewController: UIViewController, UITableViewDelegate, UITableViewData
                 
                 do {
                     let decoded = try JSONDecoder().decode(TodoAPIResponse.self, from: data)
-                    let todosFromAPI = decoded.todos.map { apiTodo -> ToDo in
-                        return ToDo(name: apiTodo.todo,
-                                    isCompleted: apiTodo.completed,
-                                    id: UUID(),
-                                    date: Date(),
-                                    userId: apiTodo.userId)
-                    }
-                    
                     DispatchQueue.main.async {
-                        self.todos.append(contentsOf: todosFromAPI)
-                        self.tableView.reloadData()
-                        self.updateTaskCount()
-                        
-                        for todo in todosFromAPI {
-                            self.saveTask(name: todo.name,
-                                          isCompleted: todo.isCompleted,
-                                          id: todo.id,
-                                          description: todo.descriptionToDo,
-                                          date: todo.date,
-                                          userId: todo.userId)
+                        for apiTodo in decoded.todos {
+                            self.saveTask(
+                                name: apiTodo.todo,
+                                isCompleted: apiTodo.completed,
+                                id: UUID(),
+                                date: Date(),
+                                userId: apiTodo.userId
+                            )
                         }
-                        
                         UserDefaults.standard.set(true, forKey: "hasLoadedTasks")
                     }
-                    
                 } catch {
                     print("❌ Ошибка парсинга JSON: \(error)")
                 }
